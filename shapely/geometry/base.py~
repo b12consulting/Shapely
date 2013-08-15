@@ -173,9 +173,8 @@ class BaseGeometry(object):
     def __eq__(self, other):
         return bool(self.impl['equals'](self, other))
 
-    # http://stackoverflow.com/questions/18256945
     def __hash__(self):
-        return hash(self.wkt)
+         return hash(id(self))
 
     # The _geom property
     def _get_geom(self):
