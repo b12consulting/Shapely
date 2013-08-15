@@ -49,6 +49,9 @@ class Point(BaseGeometry):
         if len(args) > 0:
             self._set_coords(*args)
 
+    def __hash__(self):
+         return hash(self.x) + hash(self.y)
+
     # Coordinate getters and setters
 
     @property
