@@ -19,7 +19,7 @@ import sys, os
 sys.path.append(os.path.abspath('sphinxext'))
 
 # Load latest source tree
-sys.path.insert(0, '..')
+sys.path.insert(0, os.path.abspath('..'))
 
 import shapely
 
@@ -35,15 +35,15 @@ extensions = [
     'matplotlib.sphinxext.only_directives',
     'matplotlib.sphinxext.plot_directive',
     'sphinx.ext.autodoc',
-    'sphinx.ext.pngmath', # <----- pick one, not both
-    #'sphinx.ext.mathjax', # <--/
+    #'sphinx.ext.pngmath', # <----- pick one, not both
+    'sphinx.ext.mathjax', # <--/
 ]
 
 # Add any paths that contain templates here, relative to this directory.
 #templates_path = ['_templates']
 
 # The suffix of source filenames.
-source_suffix = '.txt'
+source_suffix = '.rst'
 
 # The encoding of source files.
 #source_encoding = 'utf-8'
@@ -121,7 +121,7 @@ html_theme_path = ['themes']
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
-#html_title = None
+html_title = "Shapely 1.2 and 1.3 documentation"
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
 #html_short_title = None

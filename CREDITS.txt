@@ -3,21 +3,48 @@ Credits
 
 Shapely is written by:
 
-* Sean Gillies
-* Aron Bierbaum
-* Kai Lautaportti
-* Oliver Tonnhofer
+* Sean Gillies <sean.gillies@gmail.com>
+* Oliver Tonnhofer <olt@bogosoft.com>
+* Mike Toews <mwtoews@gmail.com>
+* Joshua Arnott <josh@snorfalorpagus.net>
+* Jacob Wasserman <jwasserman@gmail.com>
+* Aron Bierbaum <aronbierbaum@gmail.com>
+* Johannes Schönberger <jschoenberger@demuc.de>
+* Phil Elson <pelson.pub@gmail.com>
+* Howard Butler <hobu.inc@gmail.com>
+* dokai <dokai@b426a367-1105-0410-b9ff-cdf4ab011145>
+* Gabi Davar <grizzly.nyo@gmail.com>
+* Kelsey Jordahl <kjordahl@enthought.com>
+* Dave Collins <dave@hopest.net>
+* Jinkun Wang <mejkunw@gmail.com>
+* Marc Jansen <jansen@terrestris.de>
+* Henry Walshaw <henry.walshaw@gmail.com>
+* David Baumgold <david@davidbaumgold.com>
+* Sampo Syrjanen <sampo.syrjanen@here.com>
+* Steve M. Kim <steve@climate.com>
+* Thomas Kluyver <takowl@gmail.com>
+* Brad Hards <bradh@frogmouth.net>
+* Allan Adair <allan.m.adair@gmail.com>
+* fredj <frederic.junod@camptocamp.com>
+* Naveen Michaud-Agrawal <naveen.michaudagrawal@gmail.com>
+* Peter Sagerson <psagers.github@ignorare.net>
+* BertrandGervais <bertrand.gervais.pro@gmail.com>
+* Jeethu Rao <jeethu@jeethurao.com>
+* Jason Sanford <jason.sanford@mapmyfitness.com>
+* Brandon Wood <btwood@geometeor.com>
+* Stephan Hügel <urschrei@gmail.com>
+* Johan Euphrosine <proppy@aminche.com>
+* mindw <grizzly.nyo@gmail.com>
+* James Spencer <james.s.spencer@gmail.com>
+* Benjamin Root <ben.v.root@gmail.com>
+* Leandro Lima <leandro@limaesilva.com.br>
+* Maarten Vermeyen <maarten.vermeyen@rwo.vlaanderen.be>
+* Tobias Sauerwein <tobias.sauerwein@camptocamp.com>
+* James Douglass <jamesdouglassusa@gmail.com>
+* Morris Tweed <tweed.morris@gmail.com>]
+* WANG Aiyong <gepcelway@gmail.com>
 
-Patches contributed by:
-
-* Howard Butler
-* Fr |eaigue| d |eaigue| ric Junod
-* Eric Lemoine
-* Jonathan Tartley
-* Kristian Thy
-* Mike Toews (https://github.com/mwtoews)
-* Phil Elson (https://github.com/pelson)
-* Jeethu Rao (https://github.com/jeethu)
+See also: https://github.com/Toblerity/Shapely/graphs/contributors.
 
 Additional help from:
 
@@ -29,6 +56,4 @@ Additional help from:
 Major portions of this work were supported by a grant (for Pleiades_) from the
 U.S. National Endowment for the Humanities (http://www.neh.gov).
 
-.. |eaigue| unicode:: U+00E9
-   :trim:
 .. _Pleiades: http://pleiades.stoa.org

@@ -2,129 +2,167 @@
 Shapely
 =======
 
-PostGIS-ish operations outside a database context for Pythoneers and
-Pythonistas.
+Manipulation and analysis of geometric objects in the Cartesian plane.
+
+.. image:: https://travis-ci.org/Toblerity/Shapely.png?branch=master
+   :target: https://travis-ci.org/Toblerity/Shapely
+
+.. image:: https://coveralls.io/repos/github/Toblerity/Shapely/badge.svg?branch=master
+   :target: https://coveralls.io/github/Toblerity/Shapely?branch=master
 
 .. image:: http://farm3.staticflickr.com/2738/4511827859_b5822043b7_o_d.png
    :width: 800
    :height: 400
 
 Shapely is a BSD-licensed Python package for manipulation and analysis of
-planar geometric objects. It is based on the widely deployed GEOS_ (the engine
-of PostGIS_) and JTS_ (from which GEOS is ported) libraries. This C dependency
-is traded for the ability to execute with blazing speed. Shapely is not
-concerned with data formats or coordinate systems, but can be readily
-integrated with packages that are. For more details, see:
+planar geometric objects. It is based on the widely deployed `GEOS
+<http://trac.osgeo.org/geos/>`__ (the engine of `PostGIS
+<http://postgis.org>`__) and `JTS
+<http://www.vividsolutions.com/jts/jtshome.htm>`__ (from which GEOS is ported)
+libraries. Shapely is not concerned with data formats or coordinate systems,
+but can be readily integrated with packages that are. For more details, see:
 
-* Shapely manual_
-* Shapely `example apps`_
+* Shapely on `GitHub <https://github.com/Toblerity/Shapely>`__
+* The Shapely `manual <http://toblerity.github.com/shapely/manual.html>`__
 
-Dependencies
+Requirements
 ============
 
-Shapely 1.2 depends on:
+Shapely 1.5.x requires
 
-* Python >=2.5,<3
-* libgeos_c >=3.1 (3.0 and below have not been tested, YMMV)
+* Python >=2.6 (including Python 3.x)
+* GEOS >=3.3 (Shapely 1.2.x requires only GEOS 3.1 but YMMV)
 
-Installation
-============
+Installing Shapely
+==================
 
-Windows users should use the executable installer, which contains the required
-GEOS DLL. Other users should acquire libgeos_c by any means, make sure that it
-is on the system library path, and install from the Python package index::
+Windows users have two good installation options: the wheels at
+http://www.lfd.uci.edu/~gohlke/pythonlibs/#shapely and the 
+Anaconda platform's [conda-forge](https://conda-forge.github.io/)
+channel.
 
-  $ pip install Shapely
+OS X users can get Shapely wheels with GEOS included from the 
+Python Package Index with pip:
 
-or from a source distribution with the setup script::
+.. code-block:: console
 
-  $ python setup.py install
+    $ pip install shapely
 
-.. warning:: Windows users:
-   do not under any circumstances use pip (or easy_install) to uninstall
-   Shapely versions < 1.2.17. Due to the way Shapely used to install its GEOS
-   DLL and a distribute or setuptools bug, your Python installation may be
-   broken by an uninstall command. Shapely 1.2.17 will uninstall safely.
+If you want to build Shapely from source for compatibility with
+other modules that depend on GEOS (such as cartopy or osgeo.ogr)
+you may ignore the binary wheels.
+
+.. code-block:: console
+
+    $ pip install shapely --no-binary shapely
+
+Experimental binary wheels are also available for Linux. To get them,
+use `pip --pre shapely`. To avoid them, use 
+`pip install --pre shapely --no-binary shapely`.
+
+In other situations, install `geos_c` libs and headers by any means 
+(for example, `brew install geos` on OS X or
+`apt-get install libgeos-dev` on Debian/Ubuntu) and install Shapely
+from the Python package index.
+
+.. code-block:: console
+
+    $ pip install shapely
+
+If you've installed GEOS to a standard location, the geos-config program
+will be used to get compiler and linker options. If geos-config is not on
+your executable, it can be specified with a GEOS_CONFIG environment
+variable, e.g.:
+
+.. code-block:: console
+
+    $ GEOS_CONFIG=/path/to/geos-config pip install shapely
+
+If your system's GEOS version is < 3.3.0 you cannot use Shapely 1.3+ and must
+stick to 1.2.x as shown below.
+
+.. code-block:: console
+
+    $ pip install shapely<1.3
+
+Or, if you're using pip 6+
+
+.. code-block:: console
+
+    $ pip install shapely~=1.2
 
 Usage
 =====
 
 Here is the canonical example of building an approximately circular patch by
-buffering a point::
+buffering a point.
 
-  >>> from shapely.geometry import Point
-  >>> patch = Point(0.0, 0.0).buffer(10.0)
-  >>> patch
-  <shapely.geometry.polygon.Polygon object at 0x...>
-  >>> patch.area
-  313.65484905459385
+.. code-block:: pycon
 
-See the manual_ for comprehensive usage snippets and the dissolve.py and
-intersect.py `example apps`_.
+    >>> from shapely.geometry import Point
+    >>> patch = Point(0.0, 0.0).buffer(10.0)
+    >>> patch
+    <shapely.geometry.polygon.Polygon object at 0x...>
+    >>> patch.area
+    313.65484905459385
+
+See the manual for comprehensive usage snippets and the dissolve.py and
+intersect.py examples.
 
 Integration
 ===========
 
 Shapely does not read or write data files, but it can serialize and deserialize
 using several well known formats and protocols. The shapely.wkb and shapely.wkt
-modules provide dumpers and loaders inspired by Python's pickle module.::
+modules provide dumpers and loaders inspired by Python's pickle module.
 
-  >>> from shapely.wkt import dumps, loads
-  >>> dumps(loads('POINT (0 0)'))
-  'POINT (0.0000000000000000 0.0000000000000000)'
+.. code-block:: pycon
 
-All linear objects, such as the rings of a polygon (like ``patch`` above),
-provide the Numpy array interface.::
+    >>> from shapely.wkt import dumps, loads
+    >>> dumps(loads('POINT (0 0)'))
+    'POINT (0.0000000000000000 0.0000000000000000)'
 
-  >>> from numpy import asarray
-  >>> ag = asarray(patch.exterior)
-  >>> ag
-  array([[  1.00000000e+01,   0.00000000e+00],
-         [  9.95184727e+00,  -9.80171403e-01],
-         [  9.80785280e+00,  -1.95090322e+00],
-         ...
-         [  1.00000000e+01,   0.00000000e+00]])
+Shapely can also integrate with other Python GIS packages using GeoJSON-like
+dicts.
 
-That yields a Numpy array of [x, y] arrays. This is not always exactly what one
-wants for plotting shapes with Matplotlib (for example), so Shapely 1.2 adds
-a `xy` property for obtaining separate arrays of coordinate x and y values.::
+.. code-block:: pycon
 
-  >>> x, y = patch.exterior.xy
-  >>> ax = asarray(x)
-  >>> ax
-  array([  1.00000000e+01,   9.95184727e+00,   9.80785280e+00,  ...])
+    >>> import json
+    >>> from shapely.geometry import mapping, shape
+    >>> s = shape(json.loads('{"type": "Point", "coordinates": [0.0, 0.0]}'))
+    >>> s
+    <shapely.geometry.point.Point object at 0x...>
+    >>> print(json.dumps(mapping(s)))
+    {"type": "Point", "coordinates": [0.0, 0.0]}
 
-Numpy arrays can also be adapted to Shapely linestrings::
+Development and Testing
+=======================
 
-  >>> from shapely.geometry import asLineString
-  >>> asLineString(ag).length
-  62.806623139095073
-  >>> asLineString(ag).wkt
-  'LINESTRING (10.0000000000000000 0.0000000000000000, ...)'
+Dependencies for developing Shapely are listed in requirements-dev.txt. Cython
+and Numpy are not required for production installations, only for development.
+Use of a virtual environment is strongly recommended.
 
-Shapely can also integrate with other Python GIS packages using data modeled
-after GeoJSON.
+.. code-block:: console
 
-.. sourcecode:: pycon
+    $ virtualenv .
+    $ source bin/activate
+    (env)$ pip install -r requirements-dev.txt
+    (env)$ pip install -e .
 
-  >>> import json
-  >>> from shapely.geometry import mapping, shape
-  >>> s = shape(json.loads('{"type": "Point", "coordinates": [0.0, 0.0]}'))
-  >>> s
-  <shapely.geometry.point.Point object at 0x...>
-  >>> print(json.dumps(mapping(s)))
-  {"type": "Point", "coordinates": [0.0, 0.0]}
+We use py.test to run Shapely's suite of unittests and doctests.
 
-Testing
-=======
+.. code-block:: console
 
-Shapely uses a Zope-stye suite of unittests and doctests, exercised via
-setup.py.::
+    (env)$ py.test tests
 
-  $ python setup.py test
+Roadmap and Maintenance
+=======================
 
-Nosetests won't run the tests properly; Zope doctest suites are not currently
-supported well by nose.
+Shapely 1.2.x is a maintenance-only branch which supports Python 2.4-2.6, but
+not Python 3+. There will be no new features in Shapely 1.2.x and only fixes
+for major bugs.
+
+Shapely 1.4.x is a maintenance-only branch supporting Pythons 2.7 and 3.3+.
 
 Support
 =======
@@ -132,14 +170,4 @@ Support
 Please discuss Shapely with us at
 http://lists.gispython.org/mailman/listinfo/community.
 
-Bugs may be reported at https://github.com/Toblerity/Shapely.
-
-.. include:: CREDITS.txt
-
-.. _JTS: http://www.vividsolutions.com/jts/jtshome.htm
-.. _PostGIS: http://postgis.org
-.. _GEOS: http://trac.osgeo.org/geos/
-.. _example apps: https://github.com/sgillies/shapely/tree/master/shapely/examples
-.. _manual: http://toblerity.github.com/shapely/manual.html
-.. _Pleiades: http://pleiades.stoa.org
-
+Bugs may be reported at https://github.com/Toblerity/Shapely/issues.

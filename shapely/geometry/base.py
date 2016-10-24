@@ -1,14 +1,39 @@
 """Base geometry class and utilities
+
+Note: a third, z, coordinate value may be used when constructing
+geometry objects, but has no effect on geometric analysis. All
+operations are performed in the x-y plane. Thus, geometries with
+different z values may intersect or be equal.
 """
 
+from binascii import a2b_hex
 from ctypes import pointer, c_size_t, c_char_p, c_void_p
+from itertools import islice
+import math
 import sys
-import warnings
+from warnings import warn
 
+from shapely.affinity import affine_transform
 from shapely.coords import CoordinateSequence
 from shapely.ftools import wraps
+from shapely.geos import WKBWriter, WKTWriter
 from shapely.geos import lgeos, ReadingError
 from shapely.impl import DefaultImplementation, delegated
+
+
+if sys.version_info[0] < 3:
+    range = xrange
+    integer_types = (int, long)
+else:
+    integer_types = (int,)
+
+
+try:
+    import numpy as np
+    integer_types = integer_types + (np.integer,)
+except ImportError:
+    pass
+
 
 GEOMETRY_TYPES = [
     'Point',
@@ -18,13 +43,31 @@ GEOMETRY_TYPES = [
     'MultiPoint',
     'MultiLineString',
     'MultiPolygon',
-    'GeometryCollection'
-    ]
+    'GeometryCollection',
+]
+
+
+def dump_coords(geom):
+    """Dump coordinates of a geometry in the same order as data packing"""
+    if not isinstance(geom, BaseGeometry):
+        raise ValueError('Must be instance of a geometry class; found ' +
+                         geom.__class__.__name__)
+    elif geom.type in ('Point', 'LineString', 'LinearRing'):
+        return geom.coords[:]
+    elif geom.type == 'Polygon':
+        return geom.exterior.coords[:] + [i.coords[:] for i in geom.interiors]
+    elif geom.type.startswith('Multi') or geom.type == 'GeometryCollection':
+        # Recursive call
+        return [dump_coords(part) for part in geom]
+    else:
+        raise ValueError('Unhandled geometry type: ' + repr(geom.type))
+
 
 def geometry_type_name(g):
     if g is None:
         raise ValueError("Null geometry has no type")
     return GEOMETRY_TYPES[lgeos.GEOSGeomTypeId(g)]
+
 
 def geom_factory(g, parent=None):
     # Abstract geometry factory for use with topological methods below
@@ -40,41 +83,78 @@ def geom_factory(g, parent=None):
         [geom_type],
         )
     ob.__class__ = getattr(mod, geom_type)
-    ob.__geom__ = g
+    ob._geom = g
     ob.__p__ = parent
     if lgeos.methods['has_z'](g):
         ob._ndim = 3
     else:
         ob._ndim = 2
+    ob._is_empty = False
     return ob
 
+
 def geom_from_wkt(data):
+    warn("`geom_from_wkt` is deprecated. Use `geos.wkt_reader.read(data)`.",
+         DeprecationWarning)
+    if sys.version_info[0] >= 3:
+        data = data.encode('ascii')
     geom = lgeos.GEOSGeomFromWKT(c_char_p(data))
     if not geom:
-        raise ReadingError, \
-        "Could not create geometry because of errors while reading input."
+        raise ReadingError(
+            "Could not create geometry because of errors while reading input.")
     return geom_factory(geom)
 
+
 def geom_to_wkt(ob):
+    warn("`geom_to_wkt` is deprecated. Use `geos.wkt_writer.write(ob)`.",
+         DeprecationWarning)
     if ob is None or ob._geom is None:
         raise ValueError("Null geometry supports no operations")
     return lgeos.GEOSGeomToWKT(ob._geom)
 
+
 def deserialize_wkb(data):
-    geom = lgeos.GEOSGeomFromWKB_buf(c_char_p(data), c_size_t(len(data)));
+    geom = lgeos.GEOSGeomFromWKB_buf(c_char_p(data), c_size_t(len(data)))
     if not geom:
         raise ReadingError(
             "Could not create geometry because of errors while reading input.")
     return geom
 
+
 def geom_from_wkb(data):
+    warn("`geom_from_wkb` is deprecated. Use `geos.wkb_reader.read(data)`.",
+         DeprecationWarning)
     return geom_factory(deserialize_wkb(data))
 
+
 def geom_to_wkb(ob):
+    warn("`geom_to_wkb` is deprecated. Use `geos.wkb_writer.write(ob)`.",
+         DeprecationWarning)
     if ob is None or ob._geom is None:
         raise ValueError("Null geometry supports no operations")
     size = c_size_t()
     return lgeos.GEOSGeomToWKB_buf(c_void_p(ob._geom), pointer(size))
+
+
+def geos_geom_from_py(ob, create_func=None):
+    """Helper function for geos_*_from_py functions in each geom type.
+
+    If a create_func is specified the coodinate sequence is cloned and a new
+    geometry is created with it, otherwise the geometry is cloned directly.
+    This behaviour is useful for converting between LineString and LinearRing
+    objects.
+    """
+    if create_func is None:
+        geom = lgeos.GEOSGeom_clone(ob._geom)
+    else:
+        cs = lgeos.GEOSGeom_getCoordSeq(ob._geom)
+        cs = lgeos.GEOSCoordSeq_clone(cs)
+        geom = create_func(cs)
+
+    N = ob._ndim
+
+    return geom, N
+
 
 def exceptNull(func):
     """Decorator which helps avoid GEOS operations on null pointers."""
@@ -85,17 +165,20 @@ def exceptNull(func):
         return func(*args, **kwargs)
     return wrapper
 
+
 class CAP_STYLE(object):
     round = 1
     flat = 2
     square = 3
+
 
 class JOIN_STYLE(object):
     round = 1
     mitre = 2
     bevel = 3
 
-EMPTY = deserialize_wkb('010700000000000000'.decode('hex'))
+EMPTY = deserialize_wkb(a2b_hex(b'010700000000000000'))
+
 
 class BaseGeometry(object):
     """
@@ -118,72 +201,63 @@ class BaseGeometry(object):
     # _crs : object
     #     Coordinate reference system. Available for Shapely extensions, but
     #     not implemented here.
-    # _owned : bool
-    #     True if this object's GEOS geometry is owned by another as in the case
-    #     of a multipart geometry member.
+    # _other_owned : bool
+    #     True if this object's GEOS geometry is owned by another as in the
+    #     case of a multipart geometry member.
     __geom__ = EMPTY
     __p__ = None
     _ctypes_data = None
     _ndim = None
     _crs = None
-    _owned = False
+    _other_owned = False
+    _is_empty = True
 
     # Backend config
     impl = DefaultImplementation
 
-    @property
-    def _is_empty(self):
-        return self.__geom__ in [EMPTY, None]
-
     # a reference to the so/dll proxy to preserve access during clean up
     _lgeos = lgeos
 
-    def empty(self):
+    def empty(self, val=EMPTY):
         # TODO: defer cleanup to the implementation. We shouldn't be
         # explicitly calling a lgeos method here.
-        if not (self._owned or self._is_empty):
+        if not self._is_empty and not self._other_owned and self.__geom__:
             try:
                 self._lgeos.GEOSGeom_destroy(self.__geom__)
             except AttributeError:
-                pass # _lgeos might be empty on shutdown
-        self.__geom__ = EMPTY
+                pass  # _lgeos might be empty on shutdown
+        self._is_empty = True
+        self.__geom__ = val
 
     def __del__(self):
-        self.empty()
-        self.__geom__ = None
+        self.empty(val=None)
         self.__p__ = None
 
     def __str__(self):
-        return self.to_wkt()
+        return self.wkt
 
     # To support pickling
     def __reduce__(self):
-        return (self.__class__, (), self.to_wkb())
+        return (self.__class__, (), self.wkb)
 
     def __setstate__(self, state):
         self.empty()
         self.__geom__ = deserialize_wkb(state)
+        self._is_empty = False
         if lgeos.methods['has_z'](self.__geom__):
             self._ndim = 3
         else:
             self._ndim = 2
 
-    # To support '=='
-    # http://stackoverflow.com/questions/18256945
-    def __eq__(self, other):
-        return bool(self.impl['equals'](self, other))
-
-    # http://stackoverflow.com/questions/18256945
-    def __hash__(self):
-        return hash(self.wkt)
-
-    # The _geom property
-    def _get_geom(self):
+    @property
+    def _geom(self):
         return self.__geom__
-    def _set_geom(self, val):
+
+    @_geom.setter
+    def _geom(self, val):
         self.empty()
+        self._is_empty = val in [EMPTY, None]
         self.__geom__ = val
-    _geom = property(_get_geom, _set_geom)
 
     # Operators
     # ---------
@@ -199,6 +273,18 @@ class BaseGeometry(object):
 
     def __xor__(self, other):
         return self.symmetric_difference(other)
+
+    def __eq__(self, other):
+        return (
+            type(other) == type(self) and
+            tuple(self.coords) == tuple(other.coords)
+        )
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self.wkt)
 
     # Array and ctypes interfaces
     # ---------------------------
@@ -216,7 +302,7 @@ class BaseGeometry(object):
             typestr = '>f8'
         else:
             raise ValueError(
-                  "Unsupported byteorder: neither little nor big-endian")
+                "Unsupported byteorder: neither little nor big-endian")
         return {
             'version': 3,
             'typestr': typestr,
@@ -266,18 +352,76 @@ class BaseGeometry(object):
         return self.geometryType()
 
     def to_wkb(self):
+        warn("`to_wkb` is deprecated. Use the `wkb` property.",
+             DeprecationWarning)
         return geom_to_wkb(self)
 
     def to_wkt(self):
+        warn("`to_wkt` is deprecated. Use the `wkt` property.",
+             DeprecationWarning)
         return geom_to_wkt(self)
 
-    geom_type = property(geometryType,
-        doc="""Name of the geometry's type, such as 'Point'"""
-        )
-    wkt = property(to_wkt,
-        doc="""WKT representation of the geometry""")
-    wkb = property(to_wkb,
-        doc="""WKB representation of the geometry""")
+    @property
+    def wkt(self, **kw):
+        """WKT representation of the geometry"""
+        return WKTWriter(lgeos, **kw).write(self)
+
+    @property
+    def wkb(self):
+        """WKB representation of the geometry"""
+        return WKBWriter(lgeos).write(self)
+
+    @property
+    def wkb_hex(self):
+        """WKB hex representation of the geometry"""
+        return WKBWriter(lgeos).write_hex(self)
+
+    def svg(self, scale_factor=1., **kwargs):
+        """Raises NotImplementedError"""
+        raise NotImplementedError
+
+    def _repr_svg_(self):
+        """SVG representation for iPython notebook"""
+        svg_top = '<svg xmlns="http://www.w3.org/2000/svg" ' \
+            'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        if self.is_empty:
+            return svg_top + '/>'
+        else:
+            # Establish SVG canvas that will fit all the data + small space
+            xmin, ymin, xmax, ymax = self.bounds
+            if xmin == xmax and ymin == ymax:
+                # This is a point; buffer using an arbitrary size
+                xmin, ymin, xmax, ymax = self.buffer(1).bounds
+            else:
+                # Expand bounds by a fraction of the data ranges
+                expand = 0.04  # or 4%, same as R plots
+                widest_part = max([xmax - xmin, ymax - ymin])
+                expand_amount = widest_part * expand
+                xmin -= expand_amount
+                ymin -= expand_amount
+                xmax += expand_amount
+                ymax += expand_amount
+            dx = xmax - xmin
+            dy = ymax - ymin
+            width = min([max([100., dx]), 300])
+            height = min([max([100., dy]), 300])
+            try:
+                scale_factor = max([dx, dy]) / max([width, height])
+            except ZeroDivisionError:
+                scale_factor = 1.
+            view_box = "{0} {1} {2} {3}".format(xmin, ymin, dx, dy)
+            transform = "matrix(1,0,0,-1,0,{0})".format(ymax + ymin)
+            return svg_top + (
+                'width="{1}" height="{2}" viewBox="{0}" '
+                'preserveAspectRatio="xMinYMin meet">'
+                '<g transform="{3}">{4}</g></svg>'
+                ).format(view_box, width, height, transform,
+                         self.svg(scale_factor))
+
+    @property
+    def geom_type(self):
+        """Name of the geometry's type, such as 'Point'"""
+        return self.geometryType()
 
     # Real-valued properties and methods
     # ----------------------------------
@@ -290,6 +434,10 @@ class BaseGeometry(object):
     def distance(self, other):
         """Unitless distance to other geometry (float)"""
         return self.impl['distance'](self, other)
+
+    def hausdorff_distance(self, other):
+        """Unitless hausdorff distance to other geometry (float)"""
+        return self.impl['hausdorff_distance'](self, other)
 
     @property
     def length(self):
@@ -342,9 +490,48 @@ class BaseGeometry(object):
         """A figure that envelopes the geometry"""
         return geom_factory(self.impl['envelope'](self))
 
+    @property
+    def minimum_rotated_rectangle(self):
+        """Returns the general minimum bounding rectangle of
+        the geometry. Can possibly be rotated. If the convex hull
+        of the object is a degenerate (line or point) this same degenerate
+        is returned.
+        """
+        # first compute the convex hull
+        hull = self.convex_hull
+        try:
+            coords = hull.exterior.coords
+        except AttributeError:  # may be a Point or a LineString
+            return hull
+        # generate the edge vectors between the convex hull's coords
+        edges = ((pt2[0] - pt1[0], pt2[1] - pt1[1]) for pt1, pt2 in zip(
+            coords, islice(coords, 1, None)))
+
+        def _transformed_rects():
+            for dx, dy in edges:
+                # compute the normalized direction vector of the edge
+                # vector.
+                length = math.sqrt(dx ** 2 + dy ** 2)
+                ux, uy = dx / length, dy / length
+                # compute the normalized perpendicular vector
+                vx, vy = -uy, ux
+                # transform hull from the original coordinate system to
+                # the coordinate system defined by the edge and compute
+                # the axes-parallel bounding rectangle.
+                transf_rect = affine_transform(
+                    hull, (ux, uy, vx, vy, 0, 0)).envelope
+                # yield the transformed rectangle and a matrix to
+                # transform it back to the original coordinate system.
+                yield (transf_rect, (ux, vx, uy, vy, 0, 0))
+
+        # check for the minimum area rectangle and return it
+        transf_rect, inv_matrix = min(
+            _transformed_rects(), key=lambda r: r[0].area)
+        return affine_transform(transf_rect, inv_matrix)
+
     def buffer(self, distance, resolution=16, quadsegs=None,
                cap_style=CAP_STYLE.round, join_style=JOIN_STYLE.round,
-               mitre_limit=0):
+               mitre_limit=5.0):
         """Returns a geometry with an envelope at a distance from the object's
         envelope
 
@@ -383,15 +570,16 @@ class BaseGeometry(object):
           >>> g.buffer(1.0, cap_style='square').area
           4.0
         """
-
         if quadsegs is not None:
-            warnings.warn(
+            warn(
                 "The `quadsegs` argument is deprecated. Use `resolution`.",
                 DeprecationWarning)
             res = quadsegs
         else:
             res = resolution
-
+        if mitre_limit == 0.0:
+            raise ValueError(
+                'Cannot compute offset from zero-length line segment')
         if cap_style == CAP_STYLE.round and join_style == JOIN_STYLE.round:
             return geom_factory(self.impl['buffer'](self, distance, res))
 
@@ -406,7 +594,7 @@ class BaseGeometry(object):
 
     @delegated
     def simplify(self, tolerance, preserve_topology=True):
-        """Returns a simplified geometry produced by the Douglas-Puecker
+        """Returns a simplified geometry produced by the Douglas-Peucker
         algorithm
 
         Coordinates of the simplified geometry will be no more than the
@@ -460,6 +648,21 @@ class BaseGeometry(object):
         return bool(self.impl['is_ring'](self))
 
     @property
+    def is_closed(self):
+        """True if the geometry is closed, else False
+
+        Applicable only to 1-D geometries."""
+        if self.geom_type == 'LinearRing':
+            return True
+        elif self.geom_type == 'LineString':
+            if 'is_closed' in self.impl:
+                return bool(self.impl['is_closed'](self))
+            else:
+                return self.coords[0] == self.coords[-1]
+        else:
+            return False
+
+    @property
     def is_simple(self):
         """True if the geometry is simple, meaning that any self-intersections
         are only at boundary points, else False"""
@@ -478,6 +681,10 @@ class BaseGeometry(object):
         """Returns the DE-9IM intersection matrix for the two geometries
         (string)"""
         return self.impl['relate'](self, other)
+
+    def covers(self, other):
+        """Returns True if the geometry covers the other, else False"""
+        return bool(self.impl['covers'](self, other))
 
     def contains(self, other):
         """Returns True if the geometry contains the other, else False"""
@@ -514,13 +721,18 @@ class BaseGeometry(object):
     def equals_exact(self, other, tolerance):
         """Returns True if geometries are equal to within a specified
         tolerance"""
-        # return BinaryPredicateOp('equals_exact', self)(other, tolerance)
         return bool(self.impl['equals_exact'](self, other, tolerance))
 
     def almost_equals(self, other, decimal=6):
         """Returns True if geometries are equal at all coordinates to a
         specified decimal place"""
         return self.equals_exact(other, 0.5 * 10**(-decimal))
+
+    def relate_pattern(self, other, pattern):
+        """Returns True if the DE-9IM string code for the relationship between
+        the geometries satisfies the pattern, else False"""
+        pattern = c_char_p(pattern.encode('ascii'))
+        return bool(self.impl['relate_pattern'](self, other, pattern))
 
     # Linear referencing
     # ------------------
@@ -562,26 +774,26 @@ class BaseMultipartGeometry(BaseGeometry):
     @property
     def ctypes(self):
         raise NotImplementedError(
-        "Multi-part geometries have no ctypes representations")
+            "Multi-part geometries have no ctypes representations")
 
     @property
     def __array_interface__(self):
         """Provide the Numpy array protocol."""
-        raise NotImplementedError(
-        "Multi-part geometries do not themselves provide the array interface")
+        raise NotImplementedError("Multi-part geometries do not themselves "
+                                  "provide the array interface")
 
     def _get_coords(self):
-        raise NotImplementedError(
-        "Sub-geometries may have coordinate sequences, but collections do not")
+        raise NotImplementedError("Sub-geometries may have coordinate "
+                                  "sequences, but collections do not")
 
     def _set_coords(self, ob):
-        raise NotImplementedError(
-        "Sub-geometries may have coordinate sequences, but collections do not")
+        raise NotImplementedError("Sub-geometries may have coordinate "
+                                  "sequences, but collections do not")
 
     @property
     def coords(self):
         raise NotImplementedError(
-        "Multi-part geometries do not provide a coordinate sequence")
+            "Multi-part geometries do not provide a coordinate sequence")
 
     @property
     def geoms(self):
@@ -606,6 +818,37 @@ class BaseMultipartGeometry(BaseGeometry):
             return self.geoms[index]
         else:
             return ()[index]
+
+    def __eq__(self, other):
+        return (
+            type(other) == type(self) and
+            len(self) == len(other) and
+            all(x == y for x, y in zip(self, other))
+        )
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    __hash__ = None
+
+    def svg(self, scale_factor=1., color=None):
+        """Returns a group of SVG elements for the multipart geometry.
+
+        Parameters
+        ==========
+        scale_factor : float
+            Multiplication factor for the SVG stroke-width.  Default is 1.
+        color : str, optional
+            Hex string for stroke or fill color. Default is to use "#66cc99"
+            if geometry is valid, and "#ff3333" if invalid.
+        """
+        if self.is_empty:
+            return '<g />'
+        if color is None:
+            color = "#66cc99" if self.is_valid else "#ff3333"
+        return '<g>' + \
+            ''.join(p.svg(scale_factor, color) for p in self) + \
+            '</g>'
 
 
 class GeometrySequence(object):
@@ -638,7 +881,7 @@ class GeometrySequence(object):
 
     def _get_geom_item(self, i):
         g = self.shape_factory()
-        g._owned = True
+        g._other_owned = True
         g._geom = lgeos.GEOSGetGeometryN(self._geom, i)
         g._ndim = self._ndim
         g.__p__ = self
@@ -646,7 +889,7 @@ class GeometrySequence(object):
 
     def __iter__(self):
         self._update()
-        for i in xrange(self.__len__()):
+        for i in range(self.__len__()):
             yield self._get_geom_item(i)
 
     def __len__(self):
@@ -656,7 +899,7 @@ class GeometrySequence(object):
     def __getitem__(self, key):
         self._update()
         m = self.__len__()
-        if isinstance(key, int):
+        if isinstance(key, integer_types):
             if key + m < 0 or key >= m:
                 raise IndexError("index out of range")
             if key < 0:
@@ -670,7 +913,7 @@ class GeometrySequence(object):
                     "Heterogenous geometry collections are not sliceable")
             res = []
             start, stop, stride = key.indices(m)
-            for i in xrange(start, stop, stride):
+            for i in range(start, stop, stride):
                 res.append(self._get_geom_item(i))
             return type(self.__p__)(res or None)
         else:
@@ -696,11 +939,12 @@ class HeterogeneousGeometrySequence(GeometrySequence):
     def _get_geom_item(self, i):
         sub = lgeos.GEOSGetGeometryN(self._geom, i)
         g = geom_factory(sub, parent=self)
-        g._owned = True
+        g._other_owned = True
         return g
 
-# Test runner
+
 def _test():
+    """Test runner"""
     import doctest
     doctest.testmod()
 
